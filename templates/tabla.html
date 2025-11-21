@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registros — SensorHub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+    <header class="site-header site-header-nuevo">
+        <div class="header-inner">
+            <div class="header-branding">
+                <div class="logo-container">
+                    <div class="logo-icon"></div>
+                    <div class="title-wrapper">
+                        <h1 class="site-title">Registros</h1>
+                        <p class="site-subtitle">Datos en tiempo real</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <div class="nav-dropdown">
+                    <button class="nav-drop-toggle" aria-haspopup="true" aria-expanded="false">Nodos ▾</button>
+                    <ul class="nav-drop-list" role="menu">
+                        {% for node in nodos %}
+                        <li role="none"><a role="menuitem" href="{{ url_for('ver_por_nodo', node_id=node) }}">{{ node }}</a></li>
+                        {% else %}
+                        <li role="none"><span class="muted">Sin nodos</span></li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                
+                <nav class="top-nav top-nav-nuevo" aria-label="Principal">
+                    <a href="{{ url_for('home') }}" class="nav-link">Panel</a>
+                    <a href="{{ url_for('ver_datos') }}" class="nav-link active">Datos</a>
+                    <a href="#" class="nav-link">Configuración</a>
+                </nav>
+
+                <div class="theme-toggle">
+                    <button class="theme-switch" id="themeSwitch" aria-label="Cambiar tema">
+                        <span class="knob" aria-hidden="true"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content main-content-nuevo">
+        <section class="content-section">
+            <div class="content-card">
+                <div class="card-header">
+                    <h2>Datos de Sensores</h2>
+                    <p>Monitoreo en tiempo real de todos los nodos</p>
+                </div>
+                
+                <div id="status" class="status-bar">Conectando al servidor WebSocket...</div>
+                
+                <div class="metrics-bar">
+                    <div class="metric-item">
+                        <span class="metric-label">Total de registros:</span>
+                        <span id="total" class="metric-value">{{ datos|length }}</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Nodos activos:</span>
+                        <span class="metric-value">{{ nodos|length if nodos else 0 }}</span>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table id="tabla-datos">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Nodo</th>
+                                <th>Temp (°C)</th>
+                                <th>Humedad (%)</th>
+                                <th>Hum. Suelo</th>
+                                <th>Luz (lux)</th>
+                                <th>Luz (%)</th>
+                                <th>Fecha</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for dato in datos %}
+                            <tr>
+                                <td>{{ dato.id }}</td>
+                                <td>{{ dato.nodeId or '-' }}</td>
+                                <td>{{ "%.1f"|format(dato.temperatura) if dato.temperatura is not none else '-' }}</td>
+                                <td>{{ "%.1f"|format(dato.humedad) if dato.humedad is not none else '-' }}</td>
+                                <td>{{ "%.0f"|format(dato.soil_moisture) if dato.soil_moisture is not none else '-' }}</td>
+                                <td>{{ "%.2f"|format(dato.light) if dato.light is not none else '-' }}</td>
+                                <td>{{ "%.0f"|format(dato.percentage) if dato.percentage is not none else '-' }}%</td>
+                                <td>{{ dato.fecha_creacion or '-' }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="8">No hay datos disponibles</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="footer-inner">
+            <div class="footer-brand">
+                <div class="footer-logo">SensorHub</div>
+                <small>Sistema de Monitoreo Inteligente</small>
+            </div>
+            <nav class="footer-links">
+                <a href="{{ url_for('home') }}">Panel</a>
+                <a href="{{ url_for('ver_datos') }}">Datos</a>
+                
+            </nav>
+        </div>
+    </footer>
+
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script>
+        // Tema y funcionalidad común
+        (function () {
+            const root = document.documentElement;
+            const themeSwitch = document.getElementById('themeSwitch');
+            const STORAGE_KEY = 'site-theme';
+
+            function applyTheme(theme) {
+                const isDark = theme === 'dark';
+                root.setAttribute('data-theme', isDark ? 'dark' : '');
+                document.body.classList.toggle('dark-mode', isDark);
+            }
+
+            function detectInitialTheme() {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved === 'dark' || saved === 'light') return saved;
+                if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+                return 'light';
+            }
+
+            function toggleTheme() {
+                const current = root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                const next = current === 'dark' ? 'light' : 'dark';
+                applyTheme(next);
+                localStorage.setItem(STORAGE_KEY, next);
+            }
+
+            // Aplicar tema inicial
+            applyTheme(detectInitialTheme());
+
+            // Configurar botón de tema
+            if (themeSwitch) {
+                themeSwitch.addEventListener('click', toggleTheme);
+                themeSwitch.addEventListener('keydown', (e) => {
+                    if (e.key === ' ' || e.key === 'Enter') {
+                        e.preventDefault();
+                        toggleTheme();
+                    }
+                });
+            }
+
+            // Configurar dropdowns
+            document.querySelectorAll('.nav-drop-toggle').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const expanded = btn.getAttribute('aria-expanded') === 'true';
+                    btn.setAttribute('aria-expanded', !expanded);
+                    btn.nextElementSibling.style.display = expanded ? 'none' : 'block';
+                });
+            });
+
+            // Cerrar dropdown al hacer clic fuera
+            document.addEventListener('click', (e) => {
+                if (!e.target.matches('.nav-drop-toggle')) {
+                    document.querySelectorAll('.nav-drop-list').forEach(list => {
+                        list.style.display = 'none';
+                    });
+                    document.querySelectorAll('.nav-drop-toggle').forEach(btn => {
+                        btn.setAttribute('aria-expanded', 'false');
+                    });
+                }
+            });
+        })();
+
+        // WebSocket functionality
+        const statusDiv = document.getElementById('status');
+        const socket = io(window.location.origin, { transports: ['polling'] });
+
+        socket.on('connect', () => {
+            console.log('Conectado al servidor WebSocket', socket.id);
+            if (statusDiv) {
+                statusDiv.textContent = 'Conectado - Recibiendo datos en tiempo real';
+                statusDiv.className = 'status-bar status-success';
+            }
+        });
+
+        socket.on('connect_error', (err) => {
+            console.error('connect_error', err);
+            if (statusDiv) {
+                statusDiv.textContent = 'Error de conexión: ' + (err.message || err);
+                statusDiv.className = 'status-bar status-error';
+            }
+        });
+
+        socket.on('disconnect', (reason) => {
+            console.warn('Desconectado:', reason);
+            if (statusDiv) {
+                statusDiv.textContent = 'Desconectado: ' + reason;
+                statusDiv.className = 'status-bar status-warning';
+            }
+        });
+
+        socket.on('nuevo_dato', (dato) => {
+            console.log('Nuevo dato recibido:', dato);
+            agregarFilaDesdeObjeto(dato, true);
+        });
+
+        function agregarFilaDesdeObjeto(dato, alFrente = true) {
+            const tbody = document.querySelector('#tabla-datos tbody');
+            if (!tbody) return;
+
+            // Eliminar fila "sin datos" si existe
+            const noDataRow = tbody.querySelector('td[colspan]');
+            if (noDataRow) {
+                noDataRow.closest('tr').remove();
+            }
+
+            const nuevaFila = alFrente ? tbody.insertRow(0) : tbody.insertRow(-1);
+            nuevaFila.className = 'nuevo';
+
+            // Crear celdas
+            nuevaFila.insertCell(0).textContent = dato.id ?? '-';
+            nuevaFila.insertCell(1).textContent = dato.nodeId ?? '-';
+            nuevaFila.insertCell(2).textContent = (dato.temperatura !== undefined && dato.temperatura !== null) ? `${Number(dato.temperatura).toFixed(1)}` : '-';
+            nuevaFila.insertCell(3).textContent = (dato.humedad !== undefined && dato.humedad !== null) ? `${Number(dato.humedad).toFixed(1)}` : '-';
+            nuevaFila.insertCell(4).textContent = (dato.soil_moisture !== undefined && dato.soil_moisture !== null) ? `${Number(dato.soil_moisture).toFixed(0)}` : '-';
+            nuevaFila.insertCell(5).textContent = (dato.light !== undefined && dato.light !== null) ? `${Number(dato.light).toFixed(2)}` : '-';
+            nuevaFila.insertCell(6).textContent = (dato.percentage !== undefined && dato.percentage !== null) ? `${Number(dato.percentage).toFixed(0)}%` : '-';
+            nuevaFila.insertCell(7).textContent = dato.fecha_creacion ?? '-';
+
+            // Actualizar contador
+            const totalEl = document.getElementById('total');
+            if (totalEl) {
+                const currentTotal = parseInt(totalEl.textContent) || 0;
+                totalEl.textContent = currentTotal + 1;
+            }
+
+            // Limitar a 100 filas
+            while (tbody.rows.length > 100) {
+                tbody.deleteRow(tbody.rows.length - 1);
+            }
+        }
+    </script>
+</body>
+</html>

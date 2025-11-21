@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nodo {{ node_id }} — SensorHub</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+  <header class="site-header small">
+    <div class="header-inner">
+      <div class="title-wrapper">
+        <h1 class="site-title small">Nodo: <span class="primary-text">{{ node_id }}</span></h1>
+        <p class="site-subtitle small">Detalle y visualizaciones</p>
+      </div>
+
+      <div class="header-actions">
+        <nav class="top-nav" aria-label="Principal">
+          <a href="{{ url_for('home') }}" class="nav-link">Inicio</a>
+          <a href="{{ url_for('ver_datos') }}" class="nav-link">Tabla</a>
+          <div class="nav-dropdown">
+            <button class="nav-drop-toggle" aria-haspopup="true" aria-expanded="false">Nodos ▾</button>
+            <ul class="nav-drop-list" role="menu">
+              {% for node in nodos %}
+              <li role="none"><a role="menuitem" href="{{ url_for('ver_por_nodo', node_id=node) }}">{{ node }}</a></li>
+              {% else %}
+              <li role="none"><span class="muted">Sin nodos</span></li>
+              {% endfor %}
+            </ul>
+          </div>
+        </nav>
+
+        <div class="theme-toggle">
+          <button class="theme-switch" id="themeSwitch" aria-label="Cambiar tema">
+            <span class="knob" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <div class="card">
+      <div class="card-grid">
+        <div class="card-left">
+          <h2>Resumen</h2>
+          <div id="status" class="status-bar">Conectando al servidor WebSocket...</div>
+
+          <div class="meta-info">
+            <p id="total">Total de registros: {{ datos|length }}</p>
+            <p>Último registro: {{ ultimo_dato.id if ultimo_dato else '-' }}</p>
+          </div>
+
+          <div class="action-bar">
+            <button id="btn-refresh" class="btn">Recargar Datos</button>
+          </div>
+
+          <table id="tabla-datos" class="compact">
+            <thead>
+              <tr>
+                <th>ID</th>
+                {% if campos.temperatura %}<th>Temp (°C)</th>{% endif %}
+                {% if campos.humedad %}<th>Humedad (%)</th>{% endif %}
+                {% if campos.soil_moisture %}<th>Hum. Suelo</th>{% endif %}
+                {% if campos.light or campos.light_percentage %}<th>Luz(lux) - (%)</th>{% endif %}
+                <th>Timestamp</th>
+                <th>Fecha</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for dato in datos %}
+              <tr>
+                <td>{{ dato.id }}</td>
+                {% if campos.temperatura %}<td>{{ "%.1f"|format(dato.temperatura) if dato.temperatura is not none else '-' }}</td>{% endif %}
+                {% if campos.humedad %}<td>{{ "%.1f"|format(dato.humedad) if dato.humedad is not none else '-' }}</td>{% endif %}
+                {% if campos.soil_moisture %}<td>{{ "%.0f"|format(dato.soil_moisture) if dato.soil_moisture is not none else '-' }}</td>{% endif %}
+                {% if campos.light or campos.light_percentage %}
+                <td>
+                  {% if dato.light is not none and dato.percentage is not none %}
+                  {{ "%.2f"|format(dato.light) }} - {{ "%.0f"|format(dato.percentage) }}%
+                  {% elif dato.light is not none %}
+                  {{ "%.2f"|format(dato.light) }}
+                  {% elif dato.percentage is not none %}
+                  {{ "%.0f"|format(dato.percentage) }}%
+                  {% else %}
+                  -
+                  {% endif %}
+                </td>
+                {% endif %}
+                <td>{{ dato.timestamp or '-' }}</td>
+                <td>{{ dato.fecha_creacion or '-' }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                {% set num_columnas = 3 + (1 if campos.temperatura else 0) + (1 if campos.humedad else 0) + (1 if campos.soil_moisture else 0) + (1 if campos.light or campos.light_percentage else 0) %}
+                <td colspan="{{ num_columnas }}">No hay datos disponibles para este nodo</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card-right">
+          <h3>Gráficas</h3>
+          <div class="charts-container">
+            {% if campos.temperatura %}
+            <div class="chart-card">
+              <h4>Temperatura (°C)</h4>
+              <canvas id="chartTemperatura"></canvas>
+            </div>
+            {% endif %}
+
+            {% if campos.humedad %}
+            <div class="chart-card">
+              <h4>Humedad (%)</h4>
+              <canvas id="chartHumedad"></canvas>
+            </div>
+            {% endif %}
+
+            {% if campos.soil_moisture %}
+            <div class="chart-card">
+              <h4>Humedad del Suelo</h4>
+              <canvas id="chartSoilMoisture"></canvas>
+            </div>
+            {% endif %}
+
+            {% if campos.light or campos.light_percentage %}
+            <div class="chart-card">
+              <h4>Luz (lux)</h4>
+              <canvas id="chartLight"></canvas>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      const root = document.documentElement;
+      const body = document.body;
+      const themeSwitch = document.getElementById('themeSwitch');
+      const STORAGE_KEY = 'site-theme';
+
+      function applyTheme(theme) {
+          const isDark = theme === 'dark';
+          if (isDark) {
+              root.setAttribute('data-theme', 'dark');
+              body.classList.add('dark-mode');
+          } else {
+              root.removeAttribute('data-theme');
+              body.classList.remove('dark-mode');
+          }
+      }
+
+      function detectInitialTheme() {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved === 'dark' || saved === 'light') return saved;
+          if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+              return 'dark';
+          }
+          return 'light';
+      }
+
+      function toggleTheme() {
+          const current = root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+          const next = current === 'dark' ? 'light' : 'dark';
+          applyTheme(next);
+          try {
+              localStorage.setItem(STORAGE_KEY, next);
+          } catch (e) {
+              console.warn('No se pudo guardar la preferencia del tema:', e);
+          }
+      }
+
+      applyTheme(detectInitialTheme());
+
+      if (themeSwitch) {
+          themeSwitch.addEventListener('click', function (e) {
+              e.preventDefault();
+              toggleTheme();
+          });
+
+          themeSwitch.addEventListener('keydown', function (e) {
+              if (e.key === ' ' || e.key === 'Enter') {
+                  e.preventDefault();
+                  toggleTheme();
+              }
+          });
+      }
+
+      if (window.matchMedia) {
+          window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
+              const saved = localStorage.getItem(STORAGE_KEY);
+              if (saved !== 'dark' && saved !== 'light') {
+                  applyTheme(e.matches ? 'dark' : 'light');
+              }
+          });
+      }
+    })();
+  </script>
+
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>
+    // Placeholder para lógica de gráficas. datos_json contiene los datos serializados si los necesitas.
+  </script>
+</body>
+
+</html>
