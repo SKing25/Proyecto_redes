@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reportes — SensorHub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <header class="site-header small">
+        <div class="header-inner">
+            <div class="title-wrapper">
+                <h1 class="site-title small">Reportes</h1>
+                <p class="site-subtitle small">Generación de informes históricos</p>
+            </div>
+            <div class="header-actions">
+                <nav class="top-nav" aria-label="Principal">
+                    <a href="{{ url_for('home') }}" class="nav-link">Inicio</a>
+                    <a href="{{ url_for('ver_datos') }}" class="nav-link">Datos</a>
+                    <a href="{{ url_for('ver_alertas') }}" class="nav-link">Alertas</a>
+                </nav>
+                <div class="theme-toggle">
+                    <button class="theme-switch" id="themeSwitch" aria-label="Cambiar tema">
+                        <span class="knob" aria-hidden="true"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="card">
+            <h2>Generar Reporte</h2>
+            <p>Seleccione un rango de fechas para generar un reporte de los datos recolectados.</p>
+            
+            <form id="reportForm" class="report-form">
+                <div class="form-group">
+                    <label for="fecha_inicio">Fecha Inicio:</label>
+                    <input type="datetime-local" id="fecha_inicio" name="fecha_inicio" required>
+                </div>
+                <div class="form-group">
+                    <label for="fecha_fin">Fecha Fin:</label>
+                    <input type="datetime-local" id="fecha_fin" name="fecha_fin" required>
+                </div>
+                <button type="submit" class="btn primary">Generar Reporte</button>
+            </form>
+
+            <div id="reportResult" class="report-result" style="display:none; margin-top: 20px;">
+                <h3>Resultados</h3>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-content">
+                            <div class="metric-value" id="rep_total">0</div>
+                            <div class="metric-label">Registros</div>
+                        </div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-content">
+                            <div class="metric-value" id="rep_temp_avg">0°C</div>
+                            <div class="metric-label">Temp. Promedio</div>
+                        </div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-content">
+                            <div class="metric-value" id="rep_hum_avg">0%</div>
+                            <div class="metric-label">Hum. Promedio</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <button id="btnDownload" class="btn secondary">Descargar CSV</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script>
+        // Theme logic (copied from other files for consistency)
+        (function () {
+            const root = document.documentElement;
+            const themeSwitch = document.getElementById('themeSwitch');
+            const STORAGE_KEY = 'site-theme';
+            function applyTheme(theme) {
+                const isDark = theme === 'dark';
+                root.setAttribute('data-theme', isDark ? 'dark' : '');
+                document.body.classList.toggle('dark-mode', isDark);
+            }
+            function detectInitialTheme() {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) return saved;
+                return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            function toggleTheme() {
+                const current = root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                const next = current === 'dark' ? 'light' : 'dark';
+                applyTheme(next);
+                localStorage.setItem(STORAGE_KEY, next);
+            }
+            applyTheme(detectInitialTheme());
+            if (themeSwitch) themeSwitch.addEventListener('click', toggleTheme);
+        })();
+
+        // Report Logic
+        const socket = io(window.location.origin, { transports: ['polling'] });
+        const form = document.getElementById('reportForm');
+        const resultDiv = document.getElementById('reportResult');
+        let currentData = [];
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const start = document.getElementById('fecha_inicio').value;
+            const end = document.getElementById('fecha_fin').value;
+            
+            if(start && end) {
+                socket.emit('filtrar_por_fecha', {
+                    fecha_inicio: start,
+                    fecha_fin: end
+                });
+            }
+        });
+
+        socket.on('resultado_filtrado', (data) => {
+            currentData = data.datos;
+            resultDiv.style.display = 'block';
+            
+            document.getElementById('rep_total').textContent = data.total;
+            
+            // Calculate averages simply on client side for this demo
+            let tempSum = 0, humSum = 0, tempCount = 0, humCount = 0;
+            currentData.forEach(d => {
+                if(d.temperatura != null) { tempSum += d.temperatura; tempCount++; }
+                if(d.humedad != null) { humSum += d.humedad; humCount++; }
+            });
+            
+            document.getElementById('rep_temp_avg').textContent = tempCount ? (tempSum/tempCount).toFixed(1) + '°C' : '-';
+            document.getElementById('rep_hum_avg').textContent = humCount ? (humSum/humCount).toFixed(1) + '%' : '-';
+        });
+
+        document.getElementById('btnDownload').addEventListener('click', () => {
+            if(!currentData.length) return;
+            
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "ID,Nodo,Temperatura,Humedad,Suelo,Luz,Fecha\n";
+            
+            currentData.forEach(row => {
+                csvContent += `${row.id},${row.nodeId},${row.temperatura||''},${row.humedad||''},${row.soil_moisture||''},${row.light||''},${row.fecha_creacion}\n`;
+            });
+            
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "reporte_sensores.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+    </script>
+    
+    <style>
+        .report-form {
+            display: flex;
+            gap: 20px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .form-group label {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        .form-group input {
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-main);
+            color: var(--text-primary);
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.9; }
+        .btn.primary { background: var(--primary-color); color: white; }
+        .btn.secondary { background: var(--secondary-color); color: white; }
+    </style>
+</body>
+</html>

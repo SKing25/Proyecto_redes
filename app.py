@@ -12,9 +12,11 @@ from database import (
     obtener_ultimo_dato,
     obtener_nodos_unicos,
     obtener_campos_nodo,
-    eliminar_dato
+    obtener_resumen_nodos,
+    eliminar_dato,
+    obtener_configuracion,
+    actualizar_configuracion
 )
-import folium
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
@@ -27,20 +29,6 @@ inicializar_db(app)
 
 # Forzar modo threading para evitar problemas en ciertos entornos
 socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
-
-
-def crear_mapa(latitud, longitud):
-    """
-    Genera un HTML embebible con folium. Si falla devuelve cadena vacía.
-    """
-    try:
-        m = folium.Map(location=[latitud, longitud], zoom_start=16, control_scale=True)
-        folium.TileLayer('OpenStreetMap').add_to(m)
-        folium.CircleMarker([latitud, longitud], radius=7, color='#6dd3b6', fill=True, fill_opacity=0.9,
-                            popup='Nodo').add_to(m)
-        return m._repr_html_()
-    except Exception:
-        return ''
 
 
 def _common_context():
@@ -61,11 +49,53 @@ def _common_context():
 def home():
     try:
         ctx = _common_context()
-        mapa_html = crear_mapa(4.660753, -74.059945)
-        ctx.update({'mapa': mapa_html})
+        nodos_info = obtener_resumen_nodos()
+        ctx.update({'nodos_info': nodos_info})
         return render_template('index.html', **ctx)
     except Exception as e:
         return f"Servidor activo. Error: {str(e)}"
+
+
+@app.route('/reportes')
+def ver_reportes():
+    try:
+        ctx = _common_context()
+        return render_template('reporte.html', **ctx)
+    except Exception as e:
+        return f"Error: {e}", 500
+
+
+@app.route('/alertas')
+def ver_alertas():
+    try:
+        ctx = _common_context()
+        config = obtener_configuracion()
+        return render_template('alertas.html', config=config, **ctx)
+    except Exception as e:
+        return f"Error: {e}", 500
+
+
+@app.route('/configuracion', methods=['POST'])
+def guardar_configuracion():
+    try:
+        temp_min = request.form.get('temp_min', type=float)
+        temp_max = request.form.get('temp_max', type=float)
+        hum_min = request.form.get('hum_min', type=float)
+        hum_max = request.form.get('hum_max', type=float)
+        suelo_min = request.form.get('suelo_min', type=float)
+        suelo_max = request.form.get('suelo_max', type=float)
+        luz_min = request.form.get('luz_min', type=float)
+        luz_max = request.form.get('luz_max', type=float)
+
+        actualizar_configuracion(
+            temp_min=temp_min, temp_max=temp_max,
+            hum_min=hum_min, hum_max=hum_max,
+            suelo_min=suelo_min, suelo_max=suelo_max,
+            luz_min=luz_min, luz_max=luz_max
+        )
+        return render_template('alertas.html', config=obtener_configuracion(), **_common_context(), mensaje="Configuración guardada")
+    except Exception as e:
+        return f"Error guardando configuración: {e}", 500
 
 
 @app.route('/nodo/<string:node_id>')
@@ -152,6 +182,8 @@ def recibir_datos():
         soil_moisture = data.get('soil_moisture')
         light = data.get('light')
         percentage = data.get('percentage')
+        latitud = data.get('latitud')
+        longitud = data.get('longitud')
         node_id = data.get('nodeId') or data.get('node_id') or 'unknown'
         timestamp = data.get('timestamp')
 
@@ -161,11 +193,49 @@ def recibir_datos():
             soil_moisture=soil_moisture,
             light=light,
             percentage=percentage,
+            latitud=latitud,
+            longitud=longitud,
             node_id=node_id,
             timestamp=timestamp
         )
 
         print(f"Dato guardado en BD: ID={nuevo_dato.id}")
+
+        # Verificar alertas
+        try:
+            config = obtener_configuracion()
+            alertas = []
+            
+            if temperatura is not None:
+                if config.temp_min is not None and temperatura < config.temp_min:
+                    alertas.append(f"Temperatura baja: {temperatura}°C (Min: {config.temp_min}°C)")
+                if config.temp_max is not None and temperatura > config.temp_max:
+                    alertas.append(f"Temperatura alta: {temperatura}°C (Max: {config.temp_max}°C)")
+            
+            if humedad is not None:
+                if config.hum_min is not None and humedad < config.hum_min:
+                    alertas.append(f"Humedad baja: {humedad}% (Min: {config.hum_min}%)")
+                if config.hum_max is not None and humedad > config.hum_max:
+                    alertas.append(f"Humedad alta: {humedad}% (Max: {config.hum_max}%)")
+
+            if soil_moisture is not None:
+                if config.suelo_min is not None and soil_moisture < config.suelo_min:
+                    alertas.append(f"Humedad suelo baja: {soil_moisture}% (Min: {config.suelo_min}%)")
+                if config.suelo_max is not None and soil_moisture > config.suelo_max:
+                    alertas.append(f"Humedad suelo alta: {soil_moisture}% (Max: {config.suelo_max}%)")
+
+            if light is not None:
+                if config.luz_min is not None and light < config.luz_min:
+                    alertas.append(f"Luz baja: {light}% (Min: {config.luz_min}%)")
+                if config.luz_max is not None and light > config.luz_max:
+                    alertas.append(f"Luz alta: {light}% (Max: {config.luz_max}%)")
+
+            if alertas:
+                socketio.emit('alerta', {'node_id': node_id, 'mensajes': alertas, 'timestamp': timestamp})
+                print(f"Alertas emitidas para nodo {node_id}: {alertas}")
+
+        except Exception as e_alert:
+            print(f"Error verificando alertas: {e_alert}")
 
         try:
             payload = nuevo_dato.to_dict()

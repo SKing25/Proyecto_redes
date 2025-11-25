@@ -19,6 +19,8 @@ class DatosSensor(db.Model):
     soil_moisture = db.Column(db.Float, nullable=True)  # Humedad del suelo
     light = db.Column(db.Float, nullable=True)  # Nivel de luz
     percentage = db.Column(db.Float, nullable=True)  # Porcentaje de luz
+    latitud = db.Column(db.Float, nullable=True)
+    longitud = db.Column(db.Float, nullable=True)
     nodeId = db.Column(db.String(50), nullable=True)
     timestamp = db.Column(db.Integer, nullable=True)
     fecha_creacion = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -43,8 +45,33 @@ class DatosSensor(db.Model):
             resultado['light'] = float(self.light)
         if self.percentage is not None:
             resultado['percentage'] = float(self.percentage)
+        if self.latitud is not None:
+            resultado['latitud'] = float(self.latitud)
+        if self.longitud is not None:
+            resultado['longitud'] = float(self.longitud)
 
         return resultado
+
+
+class Configuracion(db.Model):
+    """Modelo para almacenar configuración de alertas"""
+    id = db.Column(db.Integer, primary_key=True)
+    min_temp = db.Column(db.Float, default=0.0)
+    max_temp = db.Column(db.Float, default=40.0)
+    min_hum = db.Column(db.Float, default=20.0)
+    max_hum = db.Column(db.Float, default=80.0)
+    min_soil = db.Column(db.Float, default=10.0)
+    max_soil = db.Column(db.Float, default=90.0)
+
+    def to_dict(self):
+        return {
+            'min_temp': self.min_temp,
+            'max_temp': self.max_temp,
+            'min_hum': self.min_hum,
+            'max_hum': self.max_hum,
+            'min_soil': self.min_soil,
+            'max_soil': self.max_soil
+        }
 
 
 # ==================== FUNCIONES DE ACCESO A DATOS ====================
@@ -56,7 +83,7 @@ def inicializar_db(app):
         db.create_all()
 
 
-def guardar_dato_sensor(temperatura=None, humedad=None, soil_moisture=None, light=None, percentage=None, node_id='unknown', timestamp=None):
+def guardar_dato_sensor(temperatura=None, humedad=None, soil_moisture=None, light=None, percentage=None, latitud=None, longitud=None, node_id='unknown', timestamp=None):
     """
     Guarda un nuevo dato de sensor en la base de datos
     
@@ -66,6 +93,8 @@ def guardar_dato_sensor(temperatura=None, humedad=None, soil_moisture=None, ligh
         soil_moisture: Humedad del suelo o None
         light: Nivel de luz o None
         percentage: Porcentaje luz o None
+        latitud: Latitud GPS o None
+        longitud: Longitud GPS o None
         node_id: ID del nodo sensor
         timestamp: Timestamp Unix (opcional)
     
@@ -85,6 +114,8 @@ def guardar_dato_sensor(temperatura=None, humedad=None, soil_moisture=None, ligh
         soil_val = float(soil_moisture) if soil_moisture is not None else None
         light_val = float(light) if light is not None else None
         percentage = float(percentage) if percentage is not None else None
+        lat_val = float(latitud) if latitud is not None else None
+        lon_val = float(longitud) if longitud is not None else None
 
         nuevo_dato = DatosSensor(
             temperatura=temp_val,
@@ -92,6 +123,8 @@ def guardar_dato_sensor(temperatura=None, humedad=None, soil_moisture=None, ligh
             soil_moisture=soil_val,
             light=light_val,
             percentage=percentage,
+            latitud=lat_val,
+            longitud=lon_val,
             nodeId=node_id,
             timestamp=timestamp
         )
@@ -266,6 +299,35 @@ def obtener_campos_nodo(node_id):
     return campos
 
 
+def obtener_resumen_nodos():
+    """
+    Obtiene una lista de nodos con sus capacidades detectadas.
+    
+    Returns:
+        list: Lista de diccionarios con info de cada nodo
+    """
+    nodos_ids = obtener_nodos_unicos()
+    resumen = []
+    for nid in nodos_ids:
+        campos = obtener_campos_nodo(nid)
+        # Determine active sensors list
+        sensores = []
+        if campos['temperatura']: sensores.append('Temperatura')
+        if campos['humedad']: sensores.append('Humedad')
+        if campos['soil_moisture']: sensores.append('Humedad Suelo')
+        if campos['light'] or campos['percentage']: sensores.append('Luz')
+        
+        ultimo = obtener_ultimo_dato(nid)
+        last_seen = ultimo.fecha_creacion if ultimo else None
+        
+        resumen.append({
+            'id': nid,
+            'sensores': sensores,
+            'last_seen': last_seen
+        })
+    return resumen
+
+
 def eliminar_dato(dato_id):
     """
     Elimina un dato por ID
@@ -290,3 +352,26 @@ def eliminar_dato(dato_id):
     except Exception as e:
         db.session.rollback()
         raise e
+
+
+def obtener_configuracion():
+    """Obtiene la configuración actual o crea una por defecto"""
+    config = Configuracion.query.first()
+    if not config:
+        config = Configuracion()
+        db.session.add(config)
+        db.session.commit()
+    return config
+
+
+def actualizar_configuracion(min_temp, max_temp, min_hum, max_hum, min_soil, max_soil):
+    """Actualiza la configuración de alertas"""
+    config = obtener_configuracion()
+    config.min_temp = float(min_temp)
+    config.max_temp = float(max_temp)
+    config.min_hum = float(min_hum)
+    config.max_hum = float(max_hum)
+    config.min_soil = float(min_soil)
+    config.max_soil = float(max_soil)
+    db.session.commit()
+    return config

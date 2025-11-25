@@ -206,7 +206,138 @@
   <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script>
-    // Placeholder para lógica de gráficas. datos_json contiene los datos serializados si los necesitas.
+    // Datos pasados desde Flask
+    const datos = {{ datos_json|tojson }};
+    
+    // Invertir datos para que el más antiguo esté a la izquierda en la gráfica
+    const datosGrafica = [...datos].reverse();
+    
+    const labels = datosGrafica.map(d => {
+        // Intentar parsear la fecha, asumiendo formato ISO o compatible
+        // Si fecha_creacion viene como string "YYYY-MM-DD HH:MM:SS", JS podría necesitar ayuda
+        // Pero si viene de to_dict() como string, new Date() suele funcionar
+        const date = new Date(d.fecha_creacion);
+        return isNaN(date) ? d.timestamp : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    });
+
+    const commonOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                display: false
+            },
+            tooltip: {
+                mode: 'index',
+                intersect: false,
+            }
+        },
+        scales: {
+            x: {
+                grid: {
+                    display: false
+                },
+                ticks: {
+                    maxTicksLimit: 8
+                }
+            },
+            y: {
+                beginAtZero: false,
+                grid: {
+                    color: 'rgba(0, 0, 0, 0.05)'
+                }
+            }
+        },
+        interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false
+        }
+    };
+
+    // Gráfica Temperatura
+    const ctxTemp = document.getElementById('chartTemperatura');
+    if (ctxTemp) {
+        new Chart(ctxTemp, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Temperatura (°C)',
+                    data: datosGrafica.map(d => d.temperatura),
+                    borderColor: '#e74c3c',
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 2
+                }]
+            },
+            options: commonOptions
+        });
+    }
+
+    // Gráfica Humedad
+    const ctxHum = document.getElementById('chartHumedad');
+    if (ctxHum) {
+        new Chart(ctxHum, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Humedad (%)',
+                    data: datosGrafica.map(d => d.humedad),
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 2
+                }]
+            },
+            options: commonOptions
+        });
+    }
+
+    // Gráfica Humedad Suelo
+    const ctxSoil = document.getElementById('chartSoilMoisture');
+    if (ctxSoil) {
+        new Chart(ctxSoil, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Humedad Suelo',
+                    data: datosGrafica.map(d => d.soil_moisture),
+                    borderColor: '#2ecc71',
+                    backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 2
+                }]
+            },
+            options: commonOptions
+        });
+    }
+
+    // Gráfica Luz
+    const ctxLight = document.getElementById('chartLight');
+    if (ctxLight) {
+        new Chart(ctxLight, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Luz (lux)',
+                    data: datosGrafica.map(d => d.light),
+                    borderColor: '#f1c40f',
+                    backgroundColor: 'rgba(241, 196, 15, 0.1)',
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 2
+                }]
+            },
+            options: commonOptions
+        });
+    }
   </script>
 </body>
 

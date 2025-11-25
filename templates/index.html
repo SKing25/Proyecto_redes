@@ -6,6 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SensorHub | Panel de Monitoreo</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
 </head>
 
 <body>
@@ -13,7 +16,7 @@
         <div class="header-inner">
             <div class="header-branding">
                 <div class="logo-container">
-                    <div class="logo-icon"></div>
+                    
                     <div class="title-wrapper">
                         <h1 class="site-title"><span class="primary-text">Sensor</span>Hub</h1>
                         <p class="site-subtitle">Sistema de Monitoreo Inteligente</p>
@@ -36,7 +39,8 @@
                 <nav class="top-nav top-nav-nuevo" aria-label="Principal">
                     <a href="{{ url_for('home') }}" class="nav-link active">Panel</a>
                     <a href="{{ url_for('ver_datos') }}" class="nav-link">Datos</a>
-                    <a href="#" class="nav-link">Configuración</a>
+                    <a href="{{ url_for('ver_reportes') }}" class="nav-link">Reportes</a>
+                    <a href="{{ url_for('ver_alertas') }}" class="nav-link">Alertas</a>
                 </nav>
 
                 <div class="theme-toggle">
@@ -123,11 +127,11 @@
                             <span class="btn-icon"></span>
                             <span class="btn-text">Explorar Datos</span>
                         </a>
-                        <a href="#" class="action-btn accent">
+                        <a href="{{ url_for('ver_reportes') }}" class="action-btn accent">
                             <span class="btn-icon"></span>
                             <span class="btn-text">Generar Reporte</span>
                         </a>
-                        <a href="#" class="action-btn info">
+                        <a href="{{ url_for('ver_alertas') }}" class="action-btn info">
                             <span class="btn-icon"></span>
                             <span class="btn-text">Configurar Alertas</span>
                         </a>
@@ -169,7 +173,6 @@
             </div>
         </section>
 
-        {% if mapa %}
         <section class="map-section">
             <div class="content-card">
                 <div class="card-header">
@@ -177,13 +180,51 @@
                     <p>Ubicación de los nodos de sensores en el mapa</p>
                 </div>
                 <div class="map-container">
-                    <div class="map-frame-nuevo">
-                        {{ mapa|safe }}
-                    </div>
+                    <div id="map" class="map-frame-nuevo"></div>
                 </div>
             </div>
         </section>
-        {% endif %}
+
+        <section class="nodes-section" style="margin-bottom: 30px;">
+            <div class="content-card">
+                <div class="card-header">
+                    <h3>Nodos Activos</h3>
+                    <p>Estado y capacidades de los sensores conectados</p>
+                </div>
+                <div class="nodes-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;">
+                    {% for nodo in nodos_info %}
+                    <div class="node-card" style="border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; transition: transform 0.2s;">
+                        <div class="node-header" style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <div class="node-icon" style="width: 40px; height: 40px; background: var(--primary-color); border-radius: 50%; opacity: 0.8;"></div>
+                            <div class="node-title">
+                                <h4 style="margin: 0;">{{ nodo.id }}</h4>
+                                <span class="node-status online" style="font-size: 0.8rem; color: var(--secondary-color);">● En línea</span>
+                            </div>
+                        </div>
+                        <div class="node-body">
+                            <p class="node-last-seen" style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 10px;">
+                                Última actividad: {{ nodo.last_seen.strftime('%d/%m %H:%M') if nodo.last_seen else 'N/A' }}
+                            </p>
+                            <div class="node-sensors" style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 15px;">
+                                {% for sensor in nodo.sensores %}
+                                <span class="sensor-tag" style="background: rgba(52, 152, 219, 0.1); color: var(--primary-color); padding: 2px 8px; border-radius: 12px; font-size: 0.75rem;">{{ sensor }}</span>
+                                {% else %}
+                                <span class="sensor-tag muted" style="font-size: 0.75rem;">Sin sensores</span>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="node-footer">
+                            <a href="{{ url_for('ver_por_nodo', node_id=nodo.id) }}" class="btn-view" style="display: block; text-align: center; background: var(--bg-main); padding: 8px; border-radius: 6px; text-decoration: none; font-size: 0.9rem; color: var(--text-primary);">Ver Detalles</a>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="no-nodes">
+                        <p>No hay nodos activos detectados.</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
     </main>
 
     <footer class="site-footer">
@@ -199,6 +240,8 @@
             </nav>
         </div>
     </footer>
+
+    <div id="toast-container" style="position: fixed; top: 20px; right: 20px; z-index: 1000;"></div>
 
     <script>
         (function () {
@@ -274,6 +317,97 @@
                     }
                 });
             }
+        })();
+
+        // Mapa y WebSocket
+        (function() {
+            // Inicializar mapa
+            const mapElement = document.getElementById('map');
+            if (!mapElement) return;
+
+            const map = L.map('map').setView([4.660753, -74.059945], 16); // Coordenadas iniciales por defecto
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            const markers = {}; // Almacenar marcadores por nodeId
+
+            // Conexión Socket.IO
+            const socket = io(window.location.origin, { transports: ['polling'] });
+
+            socket.on('connect', () => {
+                console.log('Conectado al servidor WebSocket para mapa');
+            });
+
+            function updateMarker(dato) {
+                if (!dato.latitud || !dato.longitud) return;
+
+                const nodeId = dato.nodeId || 'unknown';
+                const lat = parseFloat(dato.latitud);
+                const lng = parseFloat(dato.longitud);
+
+                if (markers[nodeId]) {
+                    // Actualizar posición
+                    markers[nodeId].setLatLng([lat, lng]);
+                    markers[nodeId].setPopupContent(`<b>Nodo: ${nodeId}</b><br>Temp: ${dato.temperatura ?? '-'}°C<br>Hum: ${dato.humedad ?? '-'}%`);
+                } else {
+                    // Crear nuevo marcador
+                    const marker = L.marker([lat, lng]).addTo(map)
+                        .bindPopup(`<b>Nodo: ${nodeId}</b><br>Temp: ${dato.temperatura ?? '-'}°C<br>Hum: ${dato.humedad ?? '-'}%`);
+                    markers[nodeId] = marker;
+                }
+            }
+
+            socket.on('datos_iniciales', (data) => {
+                if (data.datos && Array.isArray(data.datos)) {
+                    data.datos.forEach(updateMarker);
+                    // Centrar mapa en el último dato si existe
+                    if (data.datos.length > 0) {
+                        const last = data.datos[0];
+                        if (last.latitud && last.longitud) {
+                            map.setView([last.latitud, last.longitud], 16);
+                        }
+                    }
+                }
+            });
+
+            socket.on('nuevo_dato', (dato) => {
+                updateMarker(dato);
+                // Opcional: centrar mapa en el nuevo dato
+                if (dato.latitud && dato.longitud) {
+                    map.panTo([dato.latitud, dato.longitud]);
+                }
+            });
+
+            socket.on('alerta', (data) => {
+                const container = document.getElementById('toast-container');
+                if (!container) return;
+                
+                data.mensajes.forEach(msg => {
+                    const toast = document.createElement('div');
+                    toast.style.cssText = 'background: #e74c3c; color: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); animation: slideIn 0.3s ease-out; min-width: 250px;';
+                    toast.innerHTML = `<strong>Alerta Nodo ${data.node_id}</strong><br>${msg}`;
+                    
+                    container.appendChild(toast);
+                    
+                    setTimeout(() => {
+                        toast.style.opacity = '0';
+                        toast.style.transition = 'opacity 0.3s';
+                        setTimeout(() => toast.remove(), 300);
+                    }, 5000);
+                });
+            });
+
+            // Add keyframes for slideIn
+            const style = document.createElement('style');
+            style.innerHTML = `
+                @keyframes slideIn {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(style);
         })();
     </script>
     

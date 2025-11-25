@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuración de Alertas — SensorHub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <header class="site-header small">
+        <div class="header-inner">
+            <div class="title-wrapper">
+                <h1 class="site-title small">Alertas</h1>
+                <p class="site-subtitle small">Configuración de umbrales</p>
+            </div>
+            <div class="header-actions">
+                <nav class="top-nav" aria-label="Principal">
+                    <a href="{{ url_for('home') }}" class="nav-link">Inicio</a>
+                    <a href="{{ url_for('ver_datos') }}" class="nav-link">Datos</a>
+                    <a href="{{ url_for('ver_reportes') }}" class="nav-link">Reportes</a>
+                </nav>
+                <div class="theme-toggle">
+                    <button class="theme-switch" id="themeSwitch" aria-label="Cambiar tema">
+                        <span class="knob" aria-hidden="true"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="card">
+            <h2>Configuración de Umbrales</h2>
+            <p>Defina los valores mínimos y máximos para activar las alertas. Si un sensor reporta valores fuera de este rango, se mostrará una alerta.</p>
+            
+            <form action="{{ url_for('guardar_configuracion') }}" method="POST" class="config-form">
+                <div class="config-grid">
+                    <div class="config-item">
+                        <h3>Temperatura (°C)</h3>
+                        <div class="form-group">
+                            <label for="temp_min">Mínimo:</label>
+                            <input type="number" step="0.1" id="temp_min" name="temp_min" value="{{ config.temp_min }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="temp_max">Máximo:</label>
+                            <input type="number" step="0.1" id="temp_max" name="temp_max" value="{{ config.temp_max }}">
+                        </div>
+                    </div>
+
+                    <div class="config-item">
+                        <h3>Humedad (%)</h3>
+                        <div class="form-group">
+                            <label for="hum_min">Mínimo:</label>
+                            <input type="number" step="0.1" id="hum_min" name="hum_min" value="{{ config.hum_min }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="hum_max">Máximo:</label>
+                            <input type="number" step="0.1" id="hum_max" name="hum_max" value="{{ config.hum_max }}">
+                        </div>
+                    </div>
+
+                    <div class="config-item">
+                        <h3>Humedad Suelo (%)</h3>
+                        <div class="form-group">
+                            <label for="suelo_min">Mínimo:</label>
+                            <input type="number" step="0.1" id="suelo_min" name="suelo_min" value="{{ config.suelo_min }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="suelo_max">Máximo:</label>
+                            <input type="number" step="0.1" id="suelo_max" name="suelo_max" value="{{ config.suelo_max }}">
+                        </div>
+                    </div>
+
+                    <div class="config-item">
+                        <h3>Luz (%)</h3>
+                        <div class="form-group">
+                            <label for="luz_min">Mínimo:</label>
+                            <input type="number" step="0.1" id="luz_min" name="luz_min" value="{{ config.luz_min }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="luz_max">Máximo:</label>
+                            <input type="number" step="0.1" id="luz_max" name="luz_max" value="{{ config.luz_max }}">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn primary">Guardar Configuración</button>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script>
+        // Theme logic
+        (function () {
+            const root = document.documentElement;
+            const themeSwitch = document.getElementById('themeSwitch');
+            const STORAGE_KEY = 'site-theme';
+            function applyTheme(theme) {
+                const isDark = theme === 'dark';
+                root.setAttribute('data-theme', isDark ? 'dark' : '');
+                document.body.classList.toggle('dark-mode', isDark);
+            }
+            function detectInitialTheme() {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) return saved;
+                return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            function toggleTheme() {
+                const current = root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                const next = current === 'dark' ? 'light' : 'dark';
+                applyTheme(next);
+                localStorage.setItem(STORAGE_KEY, next);
+            }
+            applyTheme(detectInitialTheme());
+            if (themeSwitch) themeSwitch.addEventListener('click', toggleTheme);
+        })();
+    </script>
+
+    <style>
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .config-item {
+            background: var(--bg-card);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        .config-item h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            color: var(--primary-color);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-main);
+            color: var(--text-primary);
+        }
+        .form-actions {
+            text-align: right;
+        }
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1rem;
+        }
+        .btn.primary { background: var(--primary-color); color: white; }
+        .btn:hover { opacity: 0.9; }
+    </style>
+</body>
+</html>
