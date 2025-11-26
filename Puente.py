@@ -8,7 +8,7 @@ PORT = 1883
 TOPIC = "dht22/datos/+" 
 
 
-SERVER_URL = ""
+SERVER_URL = "http://localhost:5000/datos"
 
 node_cache = {}
 
@@ -29,6 +29,16 @@ def on_message(client, userdata, msg):
         data = json.loads(payload)
         node_id = topic.split("/")[-1] if "/" in topic else "unknown"
         
+        # Detectar mensajes de control y reenviar sin procesar
+        if "type" in data and data["type"] in ["PONG", "TOPO", "TRACE_REPLY"]:
+            print(f"Control Msg detectado: {data['type']}")
+            base_url = SERVER_URL.replace("/datos", "")
+            try:
+                requests.post(f"{base_url}/api/control_response", json=data, timeout=5)
+            except Exception as e:
+                print(f"Error enviando respuesta de control: {e}")
+            return
+
         # Caso especial: Gateway reportando su IP
         if node_id == "gateway" and "ip" in data:
             gateway_data = {

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Nodos — SensorHub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+</head>
+<body>
+    <header class="site-header small">
+        <div class="header-inner">
+            <div class="title-wrapper">
+                <h1 class="site-title small">Control de Red</h1>
+                <p class="site-subtitle small">Gestión y diagnóstico de nodos</p>
+            </div>
+            <div class="header-actions">
+                <nav class="top-nav" aria-label="Principal">
+                    <a href="{{ url_for('home') }}" class="nav-link">Inicio</a>
+                    <a href="{{ url_for('ver_datos') }}" class="nav-link">Datos</a>
+                    <a href="{{ url_for('ver_reportes') }}" class="nav-link">Reportes</a>
+                    <a href="{{ url_for('ver_alertas') }}" class="nav-link">Alertas</a>
+                </nav>
+                <div class="theme-toggle">
+                    <button class="theme-switch" id="themeSwitch" aria-label="Cambiar tema">
+                        <span class="knob" aria-hidden="true"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="control-grid">
+            <!-- Panel de Comandos -->
+            <div class="card control-panel">
+                <h2>Enviar Comandos</h2>
+                <p>Seleccione un nodo y la acción a realizar.</p>
+                
+                <div class="command-form">
+                    <div class="form-group">
+                        <label for="targetNode">Nodo Destino (ID):</label>
+                        <input type="number" id="targetNode" placeholder="Ej: 123456789">
+                        <small class="hint">Deje vacío para broadcast (solo algunos comandos)</small>
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn primary" onclick="sendCommand('PING')">
+                            <span class="icon">📡</span> PING
+                        </button>
+                        <button class="btn secondary" onclick="sendCommand('TOPO_REQ')">
+                            <span class="icon">🕸️</span> Topología
+                        </button>
+                        <button class="btn accent" onclick="sendCommand('TRACE')">
+                            <span class="icon">📍</span> Trace Route
+                        </button>
+                        <button class="btn info" onclick="sendCommand('RESTART')">
+                            <span class="icon">🔄</span> Reiniciar
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Consola de Salida -->
+            <div class="card console-panel">
+                <div class="console-header">
+                    <h2>Terminal de Salida</h2>
+                    <button class="btn-clear" onclick="clearConsole()">Limpiar</button>
+                </div>
+                <div id="consoleOutput" class="console-output">
+                    <div class="log-line system">Sistema listo. Esperando comandos...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Theme logic
+        (function () {
+            const root = document.documentElement;
+            const themeSwitch = document.getElementById('themeSwitch');
+            const STORAGE_KEY = 'site-theme';
+            function applyTheme(theme) {
+                const isDark = theme === 'dark';
+                root.setAttribute('data-theme', isDark ? 'dark' : '');
+                document.body.classList.toggle('dark-mode', isDark);
+            }
+            function detectInitialTheme() {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) return saved;
+                return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            function toggleTheme() {
+                const current = root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                const next = current === 'dark' ? 'light' : 'dark';
+                applyTheme(next);
+                localStorage.setItem(STORAGE_KEY, next);
+            }
+            applyTheme(detectInitialTheme());
+            if (themeSwitch) themeSwitch.addEventListener('click', toggleTheme);
+        })();
+
+        // Socket.IO & Command Logic
+        const socket = io(window.location.origin, { transports: ['polling'] });
+        const consoleOutput = document.getElementById('consoleOutput');
+
+        socket.on('connect', () => {
+            log('Conectado al servidor de control', 'system');
+        });
+
+        socket.on('command_response', (data) => {
+            log(`[${data.node_id}] ${JSON.stringify(data.response)}`, 'response');
+        });
+        
+        socket.on('command_sent', (data) => {
+            log(`Comando enviado: ${data.type} -> ${data.to}`, 'sent');
+        });
+
+        socket.on('error', (data) => {
+            log(`Error: ${data.mensaje}`, 'error');
+        });
+
+        function sendCommand(type) {
+            const target = document.getElementById('targetNode').value;
+            if (!target && type !== 'TOPO_REQ') { // TOPO might be broadcast? Usually unicast to gateway or specific node
+                // log('Advertencia: Enviando a broadcast', 'warning');
+            }
+            
+            const payload = {
+                type: type,
+                to: target ? parseInt(target) : 0, // 0 usually means broadcast or gateway depending on implementation
+                from: 0 // Server ID
+            };
+
+            socket.emit('enviar_comando', payload);
+        }
+
+        function log(message, type = 'info') {
+            const line = document.createElement('div');
+            line.className = `log-line ${type}`;
+            const time = new Date().toLocaleTimeString();
+            line.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-msg">${message}</span>`;
+            consoleOutput.appendChild(line);
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+
+        function clearConsole() {
+            consoleOutput.innerHTML = '<div class="log-line system">Consola limpiada.</div>';
+        }
+    </script>
+
+    <style>
+        .control-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.5fr;
+            gap: 20px;
+            height: calc(100vh - 150px);
+        }
+        
+        @media (max-width: 768px) {
+            .control-grid {
+                grid-template-columns: 1fr;
+                height: auto;
+            }
+        }
+
+        .control-panel {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .command-form {
+            margin-top: 20px;
+        }
+
+        .button-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 15px;
+            font-size: 1rem;
+        }
+
+        .console-panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .console-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .btn-clear {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+
+        .console-output {
+            flex-grow: 1;
+            background: #1e1e1e;
+            color: #f0f0f0;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            overflow-y: auto;
+            font-size: 0.9rem;
+        }
+
+        .log-line {
+            margin-bottom: 5px;
+            word-break: break-all;
+        }
+
+        .log-time {
+            color: #888;
+            margin-right: 10px;
+        }
+
+        .log-line.system { color: #3498db; }
+        .log-line.sent { color: #f1c40f; }
+        .log-line.response { color: #2ecc71; }
+        .log-line.error { color: #e74c3c; }
+        .log-line.warning { color: #e67e22; }
+
+        [data-theme="light"] .console-output {
+            background: #f8f9fa;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+    </style>
+</body>
+</html>

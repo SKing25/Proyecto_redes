@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify, render_template
 from datetime import datetime
 from flask_socketio import SocketIO, emit
+import paho.mqtt.client as mqtt
+import json
 from database import (
     inicializar_db,
     guardar_dato_sensor,
@@ -29,6 +31,27 @@ inicializar_db(app)
 
 # Forzar modo threading para evitar problemas en ciertos entornos
 socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
+
+# Configuración MQTT para Control
+MQTT_BROKER = "localhost"
+MQTT_PORT = 1883
+MQTT_TOPIC_CONTROL = "dht22/control"
+
+mqtt_client = mqtt.Client()
+
+def on_mqtt_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print("Flask conectado a MQTT Broker")
+    else:
+        print(f"Fallo conexión MQTT: {rc}")
+
+mqtt_client.on_connect = on_mqtt_connect
+
+try:
+    mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    mqtt_client.loop_start()
+except Exception as e:
+    print(f"Advertencia: No se pudo conectar a MQTT desde Flask: {e}")
 
 
 def _common_context():
@@ -71,6 +94,15 @@ def ver_alertas():
         ctx = _common_context()
         config = obtener_configuracion()
         return render_template('alertas.html', config=config, **ctx)
+    except Exception as e:
+        return f"Error: {e}", 500
+
+
+@app.route('/control')
+def ver_control():
+    try:
+        ctx = _common_context()
+        return render_template('control.html', **ctx)
     except Exception as e:
         return f"Error: {e}", 500
 
@@ -264,6 +296,16 @@ def api_datos():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/control_response', methods=['POST'])
+def recibir_respuesta_control():
+    try:
+        data = request.get_json()
+        socketio.emit('command_response', {'node_id': data.get('from'), 'response': data})
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # SOCKET.IO EVENTS
 
 @socketio.on('connect')
@@ -359,6 +401,36 @@ def handle_eliminar_dato(data):
 
     except Exception as e:
         emit('error', {'mensaje': f'Error al eliminar dato: {str(e)}'})
+
+
+@socketio.on('enviar_comando')
+def handle_enviar_comando(data):
+    try:
+        cmd_type = data.get('type')
+        target = data.get('to', 0)
+        
+        if not cmd_type:
+            emit('error', {'mensaje': 'Tipo de comando requerido'})
+            return
+
+        payload = {
+            "type": cmd_type,
+            "to": target,
+            "from": 0, # Server ID
+            "seq": int(datetime.now().timestamp())
+        }
+        
+        json_payload = json.dumps(payload)
+        
+        # Publish to MQTT
+        info = mqtt_client.publish(MQTT_TOPIC_CONTROL, json_payload)
+        info.wait_for_publish()
+        
+        emit('command_sent', payload)
+        print(f"Comando enviado MQTT: {json_payload}")
+        
+    except Exception as e:
+        emit('error', {'mensaje': f'Error enviando comando: {str(e)}'})
 
 
 if __name__ == '__main__':
