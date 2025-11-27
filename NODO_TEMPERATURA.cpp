@@ -4,7 +4,7 @@
 #include <TinyGPS++.h>
 
 #define MESH_PREFIX "RED_Nodos"
-#define MESH_PASSWORD "Horus9876"
+#define MESH_PASSWORD "RED_Nodos_1023374689"
 #define MESH_PORT 5555
 
 #define DHTPIN 4
@@ -143,29 +143,25 @@ void receivedCallback(uint32_t from, String &msg) {
 
 Task taskSendData(TASK_SECOND * 10, TASK_FOREVER, []() {
   float temp = dht.readTemperature();
-
   if (!isnan(temp)) {
-    // Construir JSON con temperatura + GPS
-    String msg = "{\"temperatura\":" + String(temp);
-    
-    // Agregar coordenadas GPS
+    StaticJsonDocument<192> doc;
+    doc["temperatura"] = temp;
     if (gps.location.isValid()) {
-      msg += ",\"lat\":" + String(gps.location.lat(), 6);
-      msg += ",\"lon\":" + String(gps.location.lng(), 6);
-      Serial.printf("GPS OK - Sat: %d\n", gps.satellites.value());
+      doc["lat"] = gps.location.lat();
+      doc["lon"] = gps.location.lng();
+      Serial.printf("[GPS] OK - Sat: %d\n", gps.satellites.value());
     } else {
-      msg += ",\"lat\":\"no data\"";
-      msg += ",\"lon\":\"no data\"";
-      Serial.printf("GPS sin fix - Sat: %d, Chars: %d\n", 
-                    gps.satellites.value(), gps.charsProcessed());
+      doc["lat"] = "no data";
+      doc["lon"] = "no data";
+      Serial.printf("[GPS] Sin fix - Sat: %d, Chars: %d\n", gps.satellites.value(), gps.charsProcessed());
     }
-    
-    msg += "}";
-    mesh.sendBroadcast(msg);
-    Serial.println("Enviado: " + msg);
-    Serial.printf("Nodos conectados: %d\n", mesh.getNodeList().size());
+    String payload;
+    serializeJson(doc, payload);
+    mesh.sendBroadcast(payload);
+    Serial.printf("[TX] TEMPERATURA -> %s\n", payload.c_str());
+    Serial.printf("[MESH] Nodos conectados: %d\n", mesh.getNodeList().size());
   } else {
-    Serial.println("Error leyendo DHT22 (TEMPERATURA)");
+    Serial.println("[SENSOR] Error leyendo DHT22 (TEMPERATURA)");
   }
 });
 

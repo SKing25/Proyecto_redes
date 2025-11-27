@@ -4,7 +4,7 @@
 #include <painlessMesh.h>
 
 #define MESH_PREFIX "RED_Nodos"
-#define MESH_PASSWORD "Horus9876"
+#define MESH_PASSWORD "RED_Nodos_1023374689"
 #define MESH_PORT 5555
 
 #define WIFI_SSID "Doo"

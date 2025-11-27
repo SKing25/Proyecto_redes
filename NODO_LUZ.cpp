@@ -3,7 +3,7 @@
 #include <painlessMesh.h>
 
 #define MESH_PREFIX "RED_Nodos"
-#define MESH_PASSWORD "Horus9876"
+#define MESH_PASSWORD "RED_Nodos_1023374689"
 #define MESH_PORT 5555
 
 #define TEMT6000_PIN 34
@@ -120,39 +120,29 @@ void receivedCallback(uint32_t from, String &msg) {
 }
 
 Task taskSendData(TASK_SECOND * 10, TASK_FOREVER, []() {
-  // Leer sensor de luz
   int rawValue = analogRead(TEMT6000_PIN);
-  
-  // Convertir a voltaje (ESP32: 0-4095 = 0-3.3V)
-  float voltage = (rawValue / 4095.0) * 3.3;
-  
-  // Convertir a lux aproximado (TEMT6000: 10mV por lux típicamente)
-  float lux = voltage * 100;  // 1V = 100 lux aproximadamente
-  
-  // Calcular porcentaje (0-100%)
-  float percentage = (rawValue / 4095.0) * 100;
+  float voltage = (rawValue / 4095.0f) * 3.3f;
+  float lux = voltage * 100.0f;     // aprox TEMT6000: 10mV ≈ 1 lux
+  float percentage = (rawValue / 4095.0f) * 100.0f;
 
-  // Construir JSON con luz + GPS
-  String msg = "{\"light\":" + String(lux, 2) + 
-               ",\"percentage\":" + String(percentage, 1);
-  
-  // Agregar coordenadas GPS
+  StaticJsonDocument<192> doc;
+  doc["light"] = lux;
+  doc["percentage"] = percentage;
   if (gps.location.isValid()) {
-    msg += ",\"lat\":" + String(gps.location.lat(), 6);
-    msg += ",\"lon\":" + String(gps.location.lng(), 6);
-    Serial.printf("GPS OK - Sat: %d\n", gps.satellites.value());
+    doc["lat"] = gps.location.lat();
+    doc["lon"] = gps.location.lng();
+    Serial.printf("[GPS] OK - Sat: %d\n", gps.satellites.value());
   } else {
-    msg += ",\"lat\":\"no data\"";
-    msg += ",\"lon\":\"no data\"";
-    Serial.printf("GPS sin fix - Sat: %d, Chars: %d\n", 
-                  gps.satellites.value(), gps.charsProcessed());
+    doc["lat"] = "no data";
+    doc["lon"] = "no data";
+    Serial.printf("[GPS] Sin fix - Sat: %d, Chars: %d\n", gps.satellites.value(), gps.charsProcessed());
   }
-  
-  msg += "}";
-  
-  mesh.sendBroadcast(msg);
-  Serial.println("Enviado: " + msg);
-  Serial.printf("Nodos conectados: %d\n", mesh.getNodeList());
+
+  String payload;
+  serializeJson(doc, payload);
+  mesh.sendBroadcast(payload);
+  Serial.printf("[TX] LUZ -> %s\n", payload.c_str());
+  Serial.printf("[MESH] Nodos conectados: %d\n", mesh.getNodeList().size());
 });
 
 void setup() {
