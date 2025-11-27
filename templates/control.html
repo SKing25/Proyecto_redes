@@ -145,17 +145,19 @@
             seq: 0,
             start: 0,
             to: null,
+            toLabel: null,
             timeoutMs: 15000,
             timer: null,
             thresholds: { near: 120, mid: 450 },
             reset() {
-                this.active = false; this.to = null; this.start = 0;
+                this.active = false; this.to = null; this.toLabel = null; this.start = 0;
                 if (this.timer) { clearTimeout(this.timer); this.timer = null; }
             },
-            startPing(to) {
+            startPing(to, label=null) {
                 this.reset();
                 this.active = true;
                 this.to = to;
+                this.toLabel = label;
                 this.seq++;
                 this.start = performance.now();
                 if (this.timer) clearTimeout(this.timer);
@@ -163,16 +165,18 @@
                     if (!this.active) return;
                     const elapsed = Math.round(performance.now() - this.start);
                     const cls = this.classify(elapsed, true);
-                    log(`PING a ${to} TIMEOUT tras ${elapsed} ms — ${cls}`, 'error');
-                    this.showInfo({ rtt: null, status: 'timeout', cls, to });
+                    const who = this.toLabel ?? to;
+                    log(`PING a ${who} TIMEOUT tras ${elapsed} ms — ${cls}`, 'error');
+                    this.showInfo({ rtt: null, status: 'timeout', cls, to, label: this.toLabel });
                     this.reset();
                 }, this.timeoutMs);
             },
             gotPong(rtt, from, extra=null) {
                 if (!this.active) return;
                 const cls = this.classify(rtt, false);
-                log(`PONG desde ${from} RTT=${rtt} ms — ${cls}`,'response');
-                this.showInfo({ rtt, status: 'ok', cls, to: this.to, extra });
+                const who = this.toLabel ?? from;
+                log(`PONG desde ${who} RTT=${rtt} ms — ${cls}`,'response');
+                this.showInfo({ rtt, status: 'ok', cls, to: this.to, label: this.toLabel, extra });
                 this.reset();
             },
             classify(ms, timedOut=false) {
@@ -181,12 +185,13 @@
                 if (ms <= this.thresholds.mid) return 'medio';
                 return 'lejos';
             },
-            showInfo({ rtt, status, cls, to, extra }) {
+            showInfo({ rtt, status, cls, to, label, extra }) {
                 let text = '';
+                const who = label ?? to;
                 if (status === 'ok') {
-                    text = `Nodo ${to}: RTT ${rtt} ms · ${cls}`;
+                    text = `Nodo ${who}: RTT ${rtt} ms · ${cls}`;
                 } else if (status === 'timeout') {
-                    text = `Nodo ${to}: sin respuesta · ${cls}`;
+                    text = `Nodo ${who}: sin respuesta · ${cls}`;
                 }
                 pingInfo.textContent = text;
                 pingInfo.className = `ping-info ${status} ${cls}`;
@@ -234,8 +239,15 @@
             log(`> ${type} enviado`, 'sent');
             // Si es PING unicast, iniciar medición
             if (type === 'PING' && target) {
-                PingMgr.startPing(parseInt(target));
-                simulatePong(payload);
+                const toNum = parseInt(target);
+                // Si el destino es 0 (interpretado como gateway), forzar respuesta "cerca"
+                if (toNum === 0) {
+                    PingMgr.startPing(0, 'gateway');
+                    simulatePong(payload, { forceNear: true, label: 'gateway' });
+                } else {
+                    PingMgr.startPing(toNum);
+                    simulatePong(payload);
+                }
             }
         }
 
@@ -281,7 +293,12 @@
             switch(cmd) {
                 case 'ping':
                     if (args.length === 1) {
-                        payload = { type: 'PING', to: parseInt(args[0]), from: 0 };
+                        // Soporta ping gw / ping gateway (atajo al gateway con respuesta "cerca")
+                        if (args[0].toLowerCase() === 'gw' || args[0].toLowerCase() === 'gateway') {
+                            payload = { type: 'PING', to: 0, from: 0, meta: 'gw' };
+                        } else {
+                            payload = { type: 'PING', to: parseInt(args[0]), from: 0 };
+                        }
                     } else if (args.length === 2) {
                         payload = { type: 'PING_CMD', from: parseInt(args[0]), to: parseInt(args[1]) };
                     } else {
@@ -315,9 +332,15 @@
             if (payload) {
                 socket.emit('enviar_comando', payload);
                 log(`> ${payload.type} enviado`, 'sent');
-                if (payload.type === 'PING' && payload.to) {
-                    PingMgr.startPing(parseInt(payload.to));
-                    simulatePong(payload);
+                if (payload.type === 'PING' && (payload.to !== undefined)) {
+                    // Si es el atajo al gateway (to=0 o meta gw), forzar respuesta rápida
+                    if (payload.to === 0 || String(payload.meta||'').toLowerCase() === 'gw') {
+                        PingMgr.startPing(0, 'gateway');
+                        simulatePong(payload, { forceNear: true, label: 'gateway' });
+                    } else if (payload.to) {
+                        PingMgr.startPing(parseInt(payload.to));
+                        simulatePong(payload);
+                    }
                 }
                 if (payload.type === 'PING_CMD' && payload.to) {
                     PingMgr.startPing(parseInt(payload.to));
@@ -327,18 +350,23 @@
             input.value='';
         }
 
-        function simulatePong(payload) {
+        function simulatePong(payload, opts = {}) {
             const to = payload?.to;
-            if (!to || !Number.isFinite(to)) return;
-            // Latencia "lejos": entre 9 y 10 segundos
-            const delay = Math.floor(9000 + Math.random() * 1000);
+            const label = opts.label || null;
+            // Permitir simular para gateway (to==0) o ids numéricos
+            if ((to === 0) || (Number.isFinite(to) && to > 0)) {
+                // Si es gateway, latencia "cerca" 50–120 ms; si no, "lejos" 9–10 s
+                const delay = opts.forceNear ? Math.floor(50 + Math.random() * 70)
+                                             : Math.floor(9000 + Math.random() * 1000);
             // Programar una respuesta simulada
-            setTimeout(() => {
-                if (!PingMgr.active) return; // Si llegó un PONG real antes, no simular
-                const resp = { type: 'PONG', from: to, to: to, rtt: delay, seq: (PingMgr.seq || 0) };
-                log(`[${to}] ${JSON.stringify(resp)}`, 'response');
-                PingMgr.gotPong(delay, to, { simulated: true });
-            }, delay);
+                setTimeout(() => {
+                    if (!PingMgr.active) return; // Si llegó un PONG real antes, no simular
+                    const fromLabel = label || to;
+                    const resp = { type: 'PONG', from: to, to: to, rtt: delay, seq: (PingMgr.seq || 0) };
+                    log(`[${fromLabel}] ${JSON.stringify(resp)}`, 'response');
+                    PingMgr.gotPong(delay, to, { simulated: true, label: fromLabel });
+                }, delay);
+            }
         }
 
         // ================== Selección de Nodos ==================
