@@ -326,13 +326,21 @@
             const mapElement = document.getElementById('map');
             if (!mapElement) return;
 
-            const map = L.map('map').setView([4.660753, -74.059945], 16); // Coordenadas iniciales por defecto
+            // Coordenadas base (4°39'39" N, 74°03'35" O)
+            const BASE_LAT = 4.660833;  // 4 + 39/60 + 39/3600
+            const BASE_LNG = -74.059722; // -(74 + 3/60 + 35/3600)
+            const map = L.map('map').setView([BASE_LAT, BASE_LNG], 16); // Centro en ubicación base
 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             }).addTo(map);
 
             const markers = {}; // Almacenar marcadores por nodeId
+
+            // Marcador Nodo
+            const baseMarker = L.marker([BASE_LAT, BASE_LNG]).addTo(map)
+                .bindPopup('<b>Nodo</b><br>4°39\'39" N, 74°03\'35" O');
+            baseMarker.openPopup();
 
             // Conexión Socket.IO
             const socket = io(window.location.origin, { transports: ['polling'] });

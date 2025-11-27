@@ -5,10 +5,10 @@ import json
 
 BROKER = "localhost"   
 PORT = 1883
-TOPIC = "dht22/datos/+" 
+TOPIC = "Nodos/datos/+" 
 
 
-SERVER_URL = "http://localhost:5000/datos"
+SERVER_URL = "https://proyecto-redes-5b146a15d8b6.herokuapp.com" #CAMBIAR POR LINK DE HEROKU
 
 node_cache = {}
 

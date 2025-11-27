@@ -35,7 +35,7 @@ socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
 # Configuración MQTT para Control
 MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
-MQTT_TOPIC_CONTROL = "dht22/control"
+MQTT_TOPIC_CONTROL = "Nodos/control"  # Ajustado para coincidir con firmware ESP32 (MQTT_TOPIC_CONTROL)
 
 mqtt_client = mqtt.Client()
 
@@ -102,6 +102,9 @@ def ver_alertas():
 def ver_control():
     try:
         ctx = _common_context()
+        # Añadimos resumen de nodos (id, sensores, last_seen) para selección en UI
+        nodos_info = obtener_resumen_nodos()
+        ctx.update({'nodos_info': nodos_info})
         return render_template('control.html', **ctx)
     except Exception as e:
         return f"Error: {e}", 500
@@ -110,22 +113,37 @@ def ver_control():
 @app.route('/configuracion', methods=['POST'])
 def guardar_configuracion():
     try:
-        temp_min = request.form.get('temp_min', type=float)
-        temp_max = request.form.get('temp_max', type=float)
-        hum_min = request.form.get('hum_min', type=float)
-        hum_max = request.form.get('hum_max', type=float)
-        suelo_min = request.form.get('suelo_min', type=float)
-        suelo_max = request.form.get('suelo_max', type=float)
+        # Tomar valores del formulario (nombres en español) y mapear a los que usa el modelo Configuracion
+        min_temp = request.form.get('temp_min', type=float)
+        max_temp = request.form.get('temp_max', type=float)
+        min_hum = request.form.get('hum_min', type=float)
+        max_hum = request.form.get('hum_max', type=float)
+        min_soil = request.form.get('suelo_min', type=float)
+        max_soil = request.form.get('suelo_max', type=float)
+
+        # Campos de luz aún no soportados en el modelo; se leen pero se ignoran por ahora
         luz_min = request.form.get('luz_min', type=float)
         luz_max = request.form.get('luz_max', type=float)
+        if luz_min is not None or luz_max is not None:
+            print("[CONFIG] Advertencia: campos luz_min/luz_max recibidos pero no almacenados (no definidos en el modelo)")
 
-        actualizar_configuracion(
-            temp_min=temp_min, temp_max=temp_max,
-            hum_min=hum_min, hum_max=hum_max,
-            suelo_min=suelo_min, suelo_max=suelo_max,
-            luz_min=luz_min, luz_max=luz_max
-        )
-        return render_template('alertas.html', config=obtener_configuracion(), **_common_context(), mensaje="Configuración guardada")
+        # Validación básica: permitir None (no cambia campo) o float
+        def safe(v):
+            return float(v) if v is not None else None
+
+        config_actual = obtener_configuracion()
+        # Sólo actualizar los campos enviados (mantener anteriores si vienen vacíos)
+        if min_temp is not None: config_actual.min_temp = safe(min_temp)
+        if max_temp is not None: config_actual.max_temp = safe(max_temp)
+        if min_hum is not None: config_actual.min_hum = safe(min_hum)
+        if max_hum is not None: config_actual.max_hum = safe(max_hum)
+        if min_soil is not None: config_actual.min_soil = safe(min_soil)
+        if max_soil is not None: config_actual.max_soil = safe(max_soil)
+
+        from database import db
+        db.session.commit()
+
+        return render_template('alertas.html', config=config_actual, **_common_context(), mensaje="Configuración guardada")
     except Exception as e:
         return f"Error guardando configuración: {e}", 500
 
@@ -239,28 +257,24 @@ def recibir_datos():
             alertas = []
             
             if temperatura is not None:
-                if config.temp_min is not None and temperatura < config.temp_min:
-                    alertas.append(f"Temperatura baja: {temperatura}°C (Min: {config.temp_min}°C)")
-                if config.temp_max is not None and temperatura > config.temp_max:
-                    alertas.append(f"Temperatura alta: {temperatura}°C (Max: {config.temp_max}°C)")
-            
+                if getattr(config, 'min_temp', None) is not None and temperatura < config.min_temp:
+                    alertas.append(f"Temperatura baja: {temperatura}°C (Min: {config.min_temp}°C)")
+                if getattr(config, 'max_temp', None) is not None and temperatura > config.max_temp:
+                    alertas.append(f"Temperatura alta: {temperatura}°C (Max: {config.max_temp}°C)")
+
             if humedad is not None:
-                if config.hum_min is not None and humedad < config.hum_min:
-                    alertas.append(f"Humedad baja: {humedad}% (Min: {config.hum_min}%)")
-                if config.hum_max is not None and humedad > config.hum_max:
-                    alertas.append(f"Humedad alta: {humedad}% (Max: {config.hum_max}%)")
+                if getattr(config, 'min_hum', None) is not None and humedad < config.min_hum:
+                    alertas.append(f"Humedad baja: {humedad}% (Min: {config.min_hum}%)")
+                if getattr(config, 'max_hum', None) is not None and humedad > config.max_hum:
+                    alertas.append(f"Humedad alta: {humedad}% (Max: {config.max_hum}%)")
 
             if soil_moisture is not None:
-                if config.suelo_min is not None and soil_moisture < config.suelo_min:
-                    alertas.append(f"Humedad suelo baja: {soil_moisture}% (Min: {config.suelo_min}%)")
-                if config.suelo_max is not None and soil_moisture > config.suelo_max:
-                    alertas.append(f"Humedad suelo alta: {soil_moisture}% (Max: {config.suelo_max}%)")
+                if getattr(config, 'min_soil', None) is not None and soil_moisture < config.min_soil:
+                    alertas.append(f"Humedad suelo baja: {soil_moisture}% (Min: {config.min_soil}%)")
+                if getattr(config, 'max_soil', None) is not None and soil_moisture > config.max_soil:
+                    alertas.append(f"Humedad suelo alta: {soil_moisture}% (Max: {config.max_soil}%)")
 
-            if light is not None:
-                if config.luz_min is not None and light < config.luz_min:
-                    alertas.append(f"Luz baja: {light}% (Min: {config.luz_min}%)")
-                if config.luz_max is not None and light > config.luz_max:
-                    alertas.append(f"Luz alta: {light}% (Max: {config.luz_max}%)")
+            # No hay límites de luz definidos en el modelo; si se requieren, extender modelo.
 
             if alertas:
                 socketio.emit('alerta', {'node_id': node_id, 'mensajes': alertas, 'timestamp': timestamp})

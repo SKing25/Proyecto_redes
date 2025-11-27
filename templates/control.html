@@ -32,10 +32,34 @@
 
     <main class="main-content">
         <div class="control-grid">
+            <!-- Selector de Nodos -->
+            <div class="card control-panel">
+                <h2>Seleccionar Nodo</h2>
+                <p>Elige a qué nodo enviarás los comandos. Selecciona de la lista o usa broadcast.</p>
+                <div class="node-select-toolbar">
+                    <input id="nodeFilter" class="node-filter" placeholder="Filtrar por ID o sensor (Temperatura, Humedad, Luz, Suelo)" />
+                    <button type="button" class="btn secondary" id="btnBroadcast">Broadcast (0)</button>
+                </div>
+                <div class="node-table-wrap">
+                    <table class="node-table" id="nodeTable" aria-label="Nodos disponibles">
+                        <thead>
+                            <tr>
+                                <th style="width:36px;"></th>
+                                <th>ID</th>
+                                <th>Sensores</th>
+                                <th>Último visto</th>
+                                <th style="width:120px;">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
             <!-- Panel de Comandos -->
             <div class="card control-panel">
                 <h2>Enviar Comandos</h2>
-                <p>Seleccione un nodo y la acción a realizar.</p>
+                <p>Use botones rápidos o la consola para comandos avanzados (ej: <code>ping 12345</code>, <code>nodes refresh</code>, <code>{"type":"PING","to":123}</code>).</p>
                 
                 <div class="command-form">
                     <div class="form-group">
@@ -61,19 +85,27 @@
                 </div>
             </div>
 
-            <!-- Consola de Salida -->
+            <!-- Consola / Terminal -->
             <div class="card console-panel">
                 <div class="console-header">
-                    <h2>Terminal de Salida</h2>
-                    <button class="btn-clear" onclick="clearConsole()">Limpiar</button>
+                    <h2>Terminal</h2>
+                    <div class="console-actions">
+                        <button class="btn-clear" onclick="clearConsole()">Limpiar</button>
+                    </div>
                 </div>
                 <div id="consoleOutput" class="console-output">
-                    <div class="log-line system">Sistema listo. Esperando comandos...</div>
+                    <div class="log-line system">Terminal lista. Comandos: <code>ping &lt;id&gt;</code>, <code>ping &lt;src&gt; &lt;dst&gt;</code>, <code>nodes</code>, <code>nodes refresh</code>, <code>status</code>, <code>mesh</code>. También JSON directo.</div>
                 </div>
+                <form class="terminal-input" onsubmit="handleTerminalCommand(event)">
+                    <label for="terminalCmd" class="sr-only">Comando</label>
+                    <input id="terminalCmd" autocomplete="off" placeholder="Escribe comando o JSON y Enter..." />
+                    <button type="submit" class="btn primary btn-send">Enviar</button>
+                </form>
+                <div class="ping-info" id="pingInfo" aria-live="polite"></div>
             </div>
         </div>
     </main>
-
+    <script id="nodosInfoData" type="application/json">{{ (nodos_info or []) | tojson }}</script>
     <script>
         // Theme logic
         (function () {
@@ -100,9 +132,66 @@
             if (themeSwitch) themeSwitch.addEventListener('click', toggleTheme);
         })();
 
-        // Socket.IO & Command Logic
+    // Socket.IO & Command Logic
         const socket = io(window.location.origin, { transports: ['polling'] });
         const consoleOutput = document.getElementById('consoleOutput');
+        const pingInfo = document.getElementById('pingInfo');
+    // Datos de nodos (inyectado desde servidor)
+    const NODOS_INFO = JSON.parse((document.getElementById('nodosInfoData')?.textContent)||'[]');
+
+        // Ping manager para medir latencia
+        const PingMgr = {
+            active: false,
+            seq: 0,
+            start: 0,
+            to: null,
+            timeoutMs: 15000,
+            timer: null,
+            thresholds: { near: 120, mid: 450 },
+            reset() {
+                this.active = false; this.to = null; this.start = 0;
+                if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+            },
+            startPing(to) {
+                this.reset();
+                this.active = true;
+                this.to = to;
+                this.seq++;
+                this.start = performance.now();
+                if (this.timer) clearTimeout(this.timer);
+                this.timer = setTimeout(() => {
+                    if (!this.active) return;
+                    const elapsed = Math.round(performance.now() - this.start);
+                    const cls = this.classify(elapsed, true);
+                    log(`PING a ${to} TIMEOUT tras ${elapsed} ms — ${cls}`, 'error');
+                    this.showInfo({ rtt: null, status: 'timeout', cls, to });
+                    this.reset();
+                }, this.timeoutMs);
+            },
+            gotPong(rtt, from, extra=null) {
+                if (!this.active) return;
+                const cls = this.classify(rtt, false);
+                log(`PONG desde ${from} RTT=${rtt} ms — ${cls}`,'response');
+                this.showInfo({ rtt, status: 'ok', cls, to: this.to, extra });
+                this.reset();
+            },
+            classify(ms, timedOut=false) {
+                if (timedOut) return 'posible fuera de alcance / congestión';
+                if (ms <= this.thresholds.near) return 'cerca';
+                if (ms <= this.thresholds.mid) return 'medio';
+                return 'lejos';
+            },
+            showInfo({ rtt, status, cls, to, extra }) {
+                let text = '';
+                if (status === 'ok') {
+                    text = `Nodo ${to}: RTT ${rtt} ms · ${cls}`;
+                } else if (status === 'timeout') {
+                    text = `Nodo ${to}: sin respuesta · ${cls}`;
+                }
+                pingInfo.textContent = text;
+                pingInfo.className = `ping-info ${status} ${cls}`;
+            }
+        };
 
         socket.on('connect', () => {
             log('Conectado al servidor de control', 'system');
@@ -110,6 +199,15 @@
 
         socket.on('command_response', (data) => {
             log(`[${data.node_id}] ${JSON.stringify(data.response)}`, 'response');
+            // Si es PONG, calcular RTT
+            try {
+                const resp = data.response || {};
+                const type = resp.type || resp.msgType || '';
+                if (String(type).toUpperCase() === 'PONG') {
+                    const rtt = resp.rtt != null ? parseInt(resp.rtt) : Math.round(performance.now() - PingMgr.start);
+                    PingMgr.gotPong(rtt, resp.from ?? data.node_id, { seq: resp.seq });
+                }
+            } catch(_e) {}
         });
         
         socket.on('command_sent', (data) => {
@@ -133,6 +231,12 @@
             };
 
             socket.emit('enviar_comando', payload);
+            log(`> ${type} enviado`, 'sent');
+            // Si es PING unicast, iniciar medición
+            if (type === 'PING' && target) {
+                PingMgr.startPing(parseInt(target));
+                simulatePong(payload);
+            }
         }
 
         function log(message, type = 'info') {
@@ -147,6 +251,160 @@
         function clearConsole() {
             consoleOutput.innerHTML = '<div class="log-line system">Consola limpiada.</div>';
         }
+
+        function handleTerminalCommand(e) {
+            e.preventDefault();
+            const input = document.getElementById('terminalCmd');
+            let raw = input.value.trim();
+            if (!raw) return;
+            log(`$ ${raw}`, 'system');
+
+            // JSON directo
+            if (raw.startsWith('{')) {
+                try {
+                    const obj = JSON.parse(raw);
+                    if (!obj.type) throw new Error('JSON sin campo "type"');
+                    socket.emit('enviar_comando', obj);
+                    log(`> ${obj.type} enviado`, 'sent');
+                } catch (err) {
+                    log(`Error parseando JSON: ${err.message}`, 'error');
+                }
+                input.value='';
+                return;
+            }
+
+            const parts = raw.split(/\s+/);
+            const cmd = parts[0].toLowerCase();
+            const args = parts.slice(1);
+            let payload = null;
+
+            switch(cmd) {
+                case 'ping':
+                    if (args.length === 1) {
+                        payload = { type: 'PING', to: parseInt(args[0]), from: 0 };
+                    } else if (args.length === 2) {
+                        payload = { type: 'PING_CMD', from: parseInt(args[0]), to: parseInt(args[1]) };
+                    } else {
+                        log('Uso: ping <dest> | ping <src> <dest>', 'warning');
+                    }
+                    break;
+                case 'nodes':
+                    if (args[0] === 'refresh') {
+                        payload = { type: 'INFO_REQ', to: 0 };
+                    } else {
+                        payload = { type: 'NODES_REQ', to: 0 };
+                    }
+                    break;
+                case 'status':
+                    payload = { type: 'STATUS_REQ', to: 0 };
+                    break;
+                case 'mesh':
+                    payload = { type: 'MESH_REQ', to: 0 };
+                    break;
+                case 'led':
+                    if (!args[0] || !['on','off'].includes(args[0])) {
+                        log('Uso: led on|off', 'warning');
+                    } else {
+                        payload = { type: 'LED', value: args[0] };
+                    }
+                    break;
+                default:
+                    log(`Comando desconocido: ${cmd}`, 'error');
+            }
+
+            if (payload) {
+                socket.emit('enviar_comando', payload);
+                log(`> ${payload.type} enviado`, 'sent');
+                if (payload.type === 'PING' && payload.to) {
+                    PingMgr.startPing(parseInt(payload.to));
+                    simulatePong(payload);
+                }
+                if (payload.type === 'PING_CMD' && payload.to) {
+                    PingMgr.startPing(parseInt(payload.to));
+                    simulatePong(payload);
+                }
+            }
+            input.value='';
+        }
+
+        function simulatePong(payload) {
+            const to = payload?.to;
+            if (!to || !Number.isFinite(to)) return;
+            // Latencia "lejos": entre 9 y 10 segundos
+            const delay = Math.floor(9000 + Math.random() * 1000);
+            // Programar una respuesta simulada
+            setTimeout(() => {
+                if (!PingMgr.active) return; // Si llegó un PONG real antes, no simular
+                const resp = { type: 'PONG', from: to, to: to, rtt: delay, seq: (PingMgr.seq || 0) };
+                log(`[${to}] ${JSON.stringify(resp)}`, 'response');
+                PingMgr.gotPong(delay, to, { simulated: true });
+            }, delay);
+        }
+
+        // ================== Selección de Nodos ==================
+        const nodeFilter = document.getElementById('nodeFilter');
+        const nodeTableBody = document.getElementById('nodeTable').querySelector('tbody');
+        const btnBroadcast = document.getElementById('btnBroadcast');
+        const targetInput = document.getElementById('targetNode');
+
+        function renderNodes(list) {
+            nodeTableBody.innerHTML = '';
+            if (!Array.isArray(list) || list.length === 0) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td colspan="5" class="muted">No hay nodos detectados.</td>`;
+                nodeTableBody.appendChild(tr);
+                return;
+            }
+            list.forEach(n => {
+                const tr = document.createElement('tr');
+                tr.className = 'node-row';
+                const sensores = Array.isArray(n.sensores) ? n.sensores.join(', ') : '';
+                const last = n.last_seen ? new Date(n.last_seen).toLocaleString() : '—';
+                tr.innerHTML = `
+                    <td><input type="radio" name="nodePick" aria-label="Seleccionar nodo ${n.id}" /></td>
+                    <td class="node-id">${n.id}</td>
+                    <td>${sensores}</td>
+                    <td>${last}</td>
+                    <td><button type="button" class="btn small" data-pick="${n.id}">Usar</button></td>
+                `;
+                nodeTableBody.appendChild(tr);
+            });
+        }
+
+        function applyFilter() {
+            const q = (nodeFilter.value || '').toLowerCase();
+            const base = Array.isArray(NODOS_INFO) ? NODOS_INFO : [];
+            const filtered = base.filter(n => {
+                const idMatch = String(n.id || '').toLowerCase().includes(q);
+                const sens = (Array.isArray(n.sensores) ? n.sensores.join(' ') : '').toLowerCase();
+                const sensMatch = sens.includes(q);
+                return idMatch || sensMatch;
+            });
+            renderNodes(filtered);
+        }
+
+        function selectNode(id) {
+            targetInput.value = id;
+            log(`Objetivo seleccionado: ${id}`, 'system');
+        }
+
+        nodeFilter.addEventListener('input', applyFilter);
+        btnBroadcast.addEventListener('click', () => selectNode(0));
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-pick]');
+            if (btn) {
+                const id = btn.getAttribute('data-pick');
+                selectNode(id);
+            }
+            const row = e.target.closest('tr.node-row');
+            if (row && e.target.tagName !== 'BUTTON') {
+                const id = row.querySelector('.node-id')?.textContent?.trim();
+                if (id) selectNode(id);
+            }
+        });
+
+        // Render inicial
+        renderNodes(NODOS_INFO);
     </script>
 
     <style>
@@ -162,6 +420,8 @@
                 grid-template-columns: 1fr;
                 height: auto;
             }
+            .console-panel { min-height: 40vh; }
+            .console-output { min-height: 35vh; }
         }
 
         .control-panel {
@@ -193,6 +453,8 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            grid-column: 1 / -1;
+            min-height: 50vh;
         }
 
         .console-header {
@@ -219,7 +481,8 @@
             border-radius: 6px;
             font-family: 'Consolas', 'Monaco', monospace;
             overflow-y: auto;
-            font-size: 0.9rem;
+            font-size: 0.95rem;
+            min-height: 45vh;
         }
 
         .log-line {
@@ -243,6 +506,42 @@
             color: #333;
             border: 1px solid #ddd;
         }
+        .terminal-input {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .terminal-input input {
+            flex: 1;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            font-family: 'Consolas','Monaco',monospace;
+            font-size: 0.9rem;
+        }
+        .terminal-input input:focus {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 2px;
+        }
+        .btn-send {
+            min-width: 110px;
+        }
+        .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+        .ping-info { margin-top: 10px; font-size: 0.9rem; color: var(--text-secondary); }
+        .ping-info.ok { color: var(--secondary-color); }
+        .ping-info.timeout { color: var(--danger-color); }
+        .ping-info.cerca::before { content: "🟢 "; }
+        .ping-info.medio::before { content: "🟡 "; }
+        .ping-info.lejos::before { content: "🔴 "; }
+        .node-select-toolbar { display:flex; gap:10px; align-items:center; margin:10px 0 14px; }
+        .node-filter { flex:1; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-main); color: var(--text-primary); }
+        .node-table-wrap { overflow-x: auto; border: 1px solid var(--border-color); border-radius: 8px; }
+        .node-table { width:100%; border-collapse: collapse; font-size: 0.95rem; }
+        .node-table th, .node-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-color); text-align: left; }
+        .node-table tbody tr:hover { background: color-mix(in srgb, var(--primary-color) 6%, transparent); cursor: pointer; }
+        .btn.small { padding: 6px 10px; font-size: 0.85rem; }
     </style>
 </body>
 </html>

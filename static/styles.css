@@ -415,28 +415,16 @@ p {
 }
 
 @keyframes pulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(52, 152, 219, 0.7); /* Hardcoded para Light Theme, usar var() es complejo con rgba */
-    }
-    70% {
-        box-shadow: 0 0 0 20px rgba(52, 152, 219, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(52, 152, 219, 0);
-    }
+    0% { box-shadow: 0 0 0 0 rgba(52, 152, 219, 0.7); }
+    70% { box-shadow: 0 0 0 20px rgba(52, 152, 219, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(52, 152, 219, 0); }
 }
-
-[data-theme="dark"] @keyframes pulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(255, 99, 71, 0.7); /* Usando Tomato del tema oscuro */
-    }
-    70% {
-        box-shadow: 0 0 0 20px rgba(255, 99, 71, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(255, 99, 71, 0);
-    }
+@keyframes pulse-dark {
+    0% { box-shadow: 0 0 0 0 rgba(255, 99, 71, 0.7); }
+    70% { box-shadow: 0 0 0 20px rgba(255, 99, 71, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 99, 71, 0); }
 }
+[data-theme="dark"] .graphic-pulse { animation: pulse-dark 2s infinite; }
 
 
 .metrics-panel {
@@ -1041,3 +1029,33 @@ p {
     color: var(--warning-color);
     border: 1px solid color-mix(in srgb, var(--warning-color) 30%, transparent);
 }
+
+/* === Terminal / Consola de Control === */
+.console-panel .terminal-input {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+}
+.console-panel .terminal-input input {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-main);
+    color: var(--text-primary);
+    font-family: 'Consolas','Monaco',monospace;
+    font-size: 0.9rem;
+}
+.console-panel .terminal-input input:focus {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+.console-panel .btn-send { min-width: 110px; }
+.log-line code { background: rgba(0,0,0,0.2); padding: 2px 4px; border-radius: 4px; font-size: 0.75rem; }
+[data-theme="light"] .log-line code { background: rgba(0,0,0,0.05); }
+.log-line.warning { color: var(--warning-color); }
+.log-line.error { color: var(--danger-color); }
+.log-line.system { color: var(--primary-color); }
+.log-line.sent { color: var(--secondary-color); }
+.log-line.response { color: var(--bg-header-start); }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
