@@ -225,23 +225,21 @@
 
         function sendCommand(type) {
             const target = document.getElementById('targetNode').value;
-            if (!target && type !== 'TOPO_REQ') { // TOPO might be broadcast? Usually unicast to gateway or specific node
-                // log('Advertencia: Enviando a broadcast', 'warning');
-            }
+            if (!target && type !== 'TOPO_REQ') { /* vacío -> asumimos gateway para PING */ }
             
             const payload = {
                 type: type,
-                to: target ? parseInt(target) : 0, // 0 usually means broadcast or gateway depending on implementation
+                to: target ? parseInt(target) : 0, // 0 = gateway/broadcast
                 from: 0 // Server ID
             };
 
             socket.emit('enviar_comando', payload);
             log(`> ${type} enviado`, 'sent');
-            // Si es PING unicast, iniciar medición
-            if (type === 'PING' && target) {
-                const toNum = parseInt(target);
-                // Si el destino es 0 (interpretado como gateway), forzar respuesta "cerca"
+            // Manejo de PING: siempre evaluar destino (vacío -> gateway)
+            if (type === 'PING') {
+                const toNum = Number.isFinite(payload.to) ? payload.to : 0;
                 if (toNum === 0) {
+                    // Gateway: respuesta "cerca" rápida
                     PingMgr.startPing(0, 'gateway');
                     simulatePong(payload, { forceNear: true, label: 'gateway' });
                 } else {
