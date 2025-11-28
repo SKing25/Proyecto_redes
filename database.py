@@ -1,17 +1,3 @@
-"""
-Módulo de acceso a datos (refactorizado)
-
-Provee:
-- Modelos SQLAlchemy para almacenamiento de lecturas y configuración
-- Funciones utilitarias para CRUD y consultas agregadas
-
-Objetivos del refactor:
-- Mejorar tipado y documentación
-- Manejo consistente de sesiones y errores
-- Pequeñas optimizaciones en consultas
-- Mantener compatibilidad funcional con la versión original
-"""
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -363,3 +349,4 @@ def actualizar_configuracion(
         db.session.rollback()
         raise
     return cfg
+
