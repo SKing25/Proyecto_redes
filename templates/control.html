@@ -235,16 +235,15 @@
 
             socket.emit('enviar_comando', payload);
             log(`> ${type} enviado`, 'sent');
-            // Manejo de PING: siempre evaluar destino (vacío -> gateway)
+
+            // Manejo de PING: iniciar medición y esperar la respuesta real del servidor/nodo
             if (type === 'PING') {
                 const toNum = Number.isFinite(payload.to) ? payload.to : 0;
                 if (toNum === 0) {
-                    // Gateway: respuesta "cerca" rápida
+                    // Ping al gateway (0): iniciamos medición pero NO simulamos respuesta
                     PingMgr.startPing(0, 'gateway');
-                    simulatePong(payload, { forceNear: true, label: 'gateway' });
                 } else {
                     PingMgr.startPing(toNum);
-                    simulatePong(payload);
                 }
             }
         }
@@ -276,6 +275,12 @@
                     if (!obj.type) throw new Error('JSON sin campo "type"');
                     socket.emit('enviar_comando', obj);
                     log(`> ${obj.type} enviado`, 'sent');
+                    // Si es PING en JSON, iniciar medición y esperar respuesta real
+                    if (String(obj.type).toUpperCase() === 'PING') {
+                        const to = (obj.to !== undefined) ? obj.to : 0;
+                        if (to === 0) PingMgr.startPing(0, 'gateway');
+                        else PingMgr.startPing(parseInt(to));
+                    }
                 } catch (err) {
                     log(`Error parseando JSON: ${err.message}`, 'error');
                 }
@@ -291,7 +296,7 @@
             switch(cmd) {
                 case 'ping':
                     if (args.length === 1) {
-                        // Soporta ping gw / ping gateway (atajo al gateway con respuesta "cerca")
+                        // Soporta ping gw / ping gateway (atajo al gateway)
                         if (args[0].toLowerCase() === 'gw' || args[0].toLowerCase() === 'gateway') {
                             payload = { type: 'PING', to: 0, from: 0, meta: 'gw' };
                         } else {
@@ -330,41 +335,20 @@
             if (payload) {
                 socket.emit('enviar_comando', payload);
                 log(`> ${payload.type} enviado`, 'sent');
+
+                // Si es PING, iniciar la medición y esperar la respuesta real del servidor/nodo
                 if (payload.type === 'PING' && (payload.to !== undefined)) {
-                    // Si es el atajo al gateway (to=0 o meta gw), forzar respuesta rápida
                     if (payload.to === 0 || String(payload.meta||'').toLowerCase() === 'gw') {
                         PingMgr.startPing(0, 'gateway');
-                        simulatePong(payload, { forceNear: true, label: 'gateway' });
                     } else if (payload.to) {
                         PingMgr.startPing(parseInt(payload.to));
-                        simulatePong(payload);
                     }
                 }
                 if (payload.type === 'PING_CMD' && payload.to) {
                     PingMgr.startPing(parseInt(payload.to));
-                    simulatePong(payload);
                 }
             }
             input.value='';
-        }
-
-        function simulatePong(payload, opts = {}) {
-            const to = payload?.to;
-            const label = opts.label || null;
-            // Permitir simular para gateway (to==0) o ids numéricos
-            if ((to === 0) || (Number.isFinite(to) && to > 0)) {
-                // Si es gateway, latencia "cerca" 50–120 ms; si no, "lejos" 9–10 s
-                const delay = opts.forceNear ? Math.floor(50 + Math.random() * 70)
-                                             : Math.floor(9000 + Math.random() * 1000);
-            // Programar una respuesta simulada
-                setTimeout(() => {
-                    if (!PingMgr.active) return; // Si llegó un PONG real antes, no simular
-                    const fromLabel = label || to;
-                    const resp = { type: 'PONG', from: to, to: to, rtt: delay, seq: (PingMgr.seq || 0) };
-                    log(`[${fromLabel}] ${JSON.stringify(resp)}`, 'response');
-                    PingMgr.gotPong(delay, to, { simulated: true, label: fromLabel });
-                }, delay);
-            }
         }
 
         // ================== Selección de Nodos ==================
